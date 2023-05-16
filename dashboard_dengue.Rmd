@@ -1,30 +1,36 @@
 ---
-title: "Painel de Monitoramento da Dengue - São Caetano do Sul 2023"
+title: "Painel de Monitoramento da Dengue - São Caetano do Sul"
 output: 
   flexdashboard::flex_dashboard:
     orientation: rows
-    vertical_layout: fill
+    vertical_layout: scroll
 ---
 
-```{r setup, include=FALSE}
+```{r setup,,  include=FALSE}
 require(flexdashboard) 
 require(foreign) 
 require(tidyverse) 
 require(lubridate)
-if(!require(xts)) install.packages("xts"); library(xts)
+require(plotly)
+require(knitr)
+require(DT)
+require(gapminder)
+require(reticulate)
+require(dplyr)
 
+infodengue_scs <- read_csv("infodengue_2012-2023.csv")
+sinan_scs <- read_csv("sinan_2012-2021")
 
-dengue_scs <- read_csv("dengue_2012-2023.csv")
 ```
 
-Row {data-height=250}
+Row {data-height=150}
 -----------------------------------------------------------------------
 
 ### Chart A
 
 ```{r}
 #BLOCO 1
-estatistica_2023 <- dengue_scs |>
+estatistica_2023 <- infodengue_scs |>
   filter(year(data_iniSE) == 2023)
 
 total_notif <- sum(estatistica_2023$casos)
@@ -37,7 +43,7 @@ icon = "fa-pencil")
 ###
 ```{r}
 #BLOCO 2
-estatistica_2023 <- dengue_scs |>
+estatistica_2023 <- infodengue_scs |>
   filter(year(data_iniSE) == 2023)
 
 media_casos <- round(mean(estatistica_2023$casos), 1)
@@ -50,7 +56,7 @@ icon = "fa-info")
 ###
 ```{r}
 #BLOCO 3
-estatistica_2023 <- dengue_scs |>
+estatistica_2023 <- infodengue_scs |>
   filter(year(data_iniSE) == 2023)
 
 total_estimado <- sum(estatistica_2023$casos_est)
@@ -61,19 +67,18 @@ color = "warning",
 icon = "fa-exclamation")
 ```
 
-Row {data-height=850}
+Row {data-height=650}
 -----------------------------------------------------------------------
-### Diagrama de Controle da Dengue
+### Diagrama de Controle da Dengue em 2023
 
 ```{r, fig.width=12, fig.height=6}
 nao_epidemic <- c(2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023)
 
-# Criando o objeto {`dengue_ano`} com ano selecionado
-dengue_ano <- dengue_scs |>
+dengue_ano <- infodengue_scs |>
   filter(year(data_iniSE) == 2023) |>
   mutate(sem_epi = epiweek(data_iniSE))
 
-dengue_stat <- dengue_scs |>
+dengue_stat <- infodengue_scs |>
   filter(year(data_iniSE) %in% nao_epidemic) |>
   mutate(sem_epi = epiweek(data_iniSE)) |>
   group_by(sem_epi) |>
@@ -85,14 +90,14 @@ dengue_stat <- dengue_scs |>
     inf = media - 2 * desvio
   )
 
-ggplot(data = dengue_stat) +
-  aes(x = sem_epi, y = media) +
+ggplot(data = dengue_stat,
+  aes(x = sem_epi, y = media)) +
   stat_smooth(
     aes(color = 'cor_incidencia_media'), size = 1.2,
     se = FALSE,
     span = 0.2
   ) +
-
+  
   stat_smooth(
     aes(y = sup, color = 'cor_limite'), size = 1.2,
     se = FALSE,
@@ -104,7 +109,7 @@ ggplot(data = dengue_stat) +
     alpha = 0.4) +
   scale_x_continuous(breaks = 1:53, expand = c(0, 0)) +
   labs(x = 'Semana Epidemiológica',
-       y = 'Incidência por 100 mil habitantes',
+       y = 'Incidência (casos por 100 mil habitantes)',
        title = '') +
   theme_classic() +
   scale_color_manual(
@@ -115,6 +120,68 @@ ggplot(data = dengue_stat) +
   scale_fill_manual(
     name = "",
     values = c('cor_incidencia' = 'deepskyblue'), labels = "Incidência de dengue em 2023"
-  )
+  ) 
+
+```
+
+Row {data-height=400}
+-----------------------------------------------------------------------
+### Tabela
+
+```{r}
+tabela1 <- infodengue_scs |>
+  mutate(incidencia = round(p_inc100k, digits = 1), 
+         temperatura = round(tempmed, digits = 0), 
+         umidade = round(umidmed, digits = 0),
+         mes_ano = paste0(day(data_iniSE),"-",
+                          month(data_iniSE),'-',year(data_iniSE)))
+
+tabela2 <- tabela1 |>
+filter(year(data_iniSE) == 2023) |>
+mutate(sem_epi = epiweek(data_iniSE)) |>
+select(mes_ano, sem_epi, casos, casos_est, incidencia, temperatura, umidade) |>
+rename("Data de Início" = mes_ano, 
+       "Semana Epidemiológica" = sem_epi, 
+       "Casos Notificados" = casos, 
+       "Casos Estimados" = casos_est, 
+       "Incidência" = incidencia, 
+       "Temperatura Média (°C)" = temperatura, 
+       "Umidade Média (%)" = umidade)
+
+datatable(tabela2,
+options = list(pageLength = 5))
+
+```
+
+Row {data-height=650}
+-----------------------------------------------------------------------
+### Série Histórica - 2012 a 2021
+
+```{r, fig.width=12, fig.height=6}
+
+dengue_grafico <- sinan_scs |> 
+  mutate(
+  DT_NOTIFIC = ymd(DT_NOTIFIC), 
+  sem_epi = epiweek(DT_NOTIFIC), 
+  ano_epi = epiyear(DT_NOTIFIC), 
+  mes = month(DT_NOTIFIC), 
+  NU_ANO = as.numeric(NU_ANO)
+)
+
+grafico_1 <- dengue_grafico |>
+  count(ano_epi, sem_epi) |>
+  ggplot(aes(
+    x = sem_epi,
+    y = n,
+    color = factor(ano_epi)
+  )) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  xlab("\nSemana Epidemiológica") + 
+  ylab("Casos Notificados") +
+  scale_color_discrete("Ano") +
+  scale_x_continuous(breaks = c(1, seq(5, 50, 5))) 
+ggplotly(grafico_1)
 
 ```
